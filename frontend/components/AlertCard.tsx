@@ -32,6 +32,23 @@ export interface Alert {
   impact_pct_of_portfolio: number | null;
   unreported_signal: boolean;
   created_at: string;
+  priority_rank?: number | null;
+  _audit_trail?: AuditStepInline[] | null;
+}
+
+interface AuditStepInline {
+  id: string;
+  alert_id: string;
+  agent_name: string;
+  action: string;
+  source_urls: string[] | null;
+  model_used: string | null;
+  fallback_occurred: boolean;
+  fallback_reason: string | null;
+  output_summary: string | null;
+  task_type: string | null;
+  estimated_cost_saved: number | null;
+  timestamp: string;
 }
 
 interface AlertCardProps {
@@ -92,6 +109,11 @@ export default function AlertCard({ alert }: AlertCardProps) {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <SignalBadge type={alert.signal_type} />
+            {alert.priority_rank != null && (
+              <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-indigo-100 text-indigo-800">
+                #{alert.priority_rank} Priority
+              </span>
+            )}
             {alert.unreported_signal && (
               <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">
                 🔍 Unreported Signal
@@ -125,12 +147,14 @@ export default function AlertCard({ alert }: AlertCardProps) {
           {alert.estimated_impact_inr_low !== null && alert.estimated_impact_inr_high !== null && (
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Estimated Impact</p>
-              <p className="text-sm font-medium text-gray-800">
+              <p className={`text-sm font-medium ${alert.estimated_impact_inr_high < 0 ? "text-red-700" : alert.estimated_impact_inr_low >= 0 ? "text-green-700" : "text-gray-800"}`}>
                 ₹{fmt(alert.estimated_impact_inr_low)} to ₹{fmt(alert.estimated_impact_inr_high)}
+                {alert.estimated_impact_inr_high < 0 && <span className="ml-1 text-xs font-normal text-red-600">(downside risk)</span>}
+                {alert.estimated_impact_inr_low >= 0 && <span className="ml-1 text-xs font-normal text-green-600">(upside potential)</span>}
               </p>
               {alert.impact_pct_of_portfolio !== null && (
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Impact: {alert.impact_pct_of_portfolio?.toFixed(1)}% of total portfolio
+                  {Math.abs(alert.impact_pct_of_portfolio ?? 0).toFixed(1)}% of total portfolio value
                 </p>
               )}
             </div>
@@ -210,7 +234,11 @@ export default function AlertCard({ alert }: AlertCardProps) {
 
       {/* Audit trail modal */}
       {auditOpen && (
-        <AuditTrailPanel alertId={alert.alert_id || (alert as any).id} onClose={() => setAuditOpen(false)} />
+        <AuditTrailPanel
+          alertId={alert.alert_id || (alert as any).id}
+          inlineSteps={alert._audit_trail || null}
+          onClose={() => setAuditOpen(false)}
+        />
       )}
     </div>
   );

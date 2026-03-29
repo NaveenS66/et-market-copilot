@@ -161,6 +161,7 @@ class AlertResponse(TypedDict):
     # Unreported signal flag (Requirement 16)
     unreported_signal: bool
     created_at: str
+    priority_rank: int | None
 
 
 class RunAnalysisRequest(TypedDict):

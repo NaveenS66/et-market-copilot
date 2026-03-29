@@ -84,52 +84,29 @@ export default function Home() {
       <section className="mb-10">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-800">My Portfolio</h2>
-          {portfolioLoading && (
-            <span className="text-xs text-gray-400">Loading…</span>
-          )}
+          {portfolioLoading && <span className="text-xs text-gray-400">Loading…</span>}
         </div>
-
         <PortfolioTable holdings={holdings} onDelete={handleDelete} />
         <AddHoldingForm onAdded={fetchPortfolio} />
       </section>
 
-      {/* Demo scenarios section */}
+      {/* Run Analysis + Alerts section */}
       <section className="mb-10">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-800">Demo Scenarios</h2>
-        </div>
-        <DemoScenarios onAlertGenerated={(alert) => {
-          setAlerts((prev: Alert[]) => {
-            const a = alert as Alert;
-            // Prepend demo alert, dedupe by ticker
-            const filtered = prev.filter((x: Alert) => x.ticker !== a.ticker);
-            return [a, ...filtered];
-          });
-        }} />
-      </section>
-
-      {/* Analysis section */}
-      <section className="mb-10">
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-4 flex-wrap mb-4">
           <RunAnalysisButton onComplete={fetchAlerts} />
           <p className="text-xs text-gray-400">
             Runs the full agent pipeline for all holdings in your portfolio.
           </p>
         </div>
-      </section>
 
-      {/* Alerts section */}
-      <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-800">Signal Alerts</h2>
-          {alertsLoading && (
-            <span className="text-xs text-gray-400">Loading…</span>
-          )}
+          {alertsLoading && <span className="text-xs text-gray-400">Loading…</span>}
         </div>
 
         {!alertsLoading && alerts.length === 0 && (
           <p className="text-gray-500 text-sm py-4">
-            No alerts yet. Run analysis to generate signals for your portfolio.
+            No alerts yet. Add holdings above and click Run Analysis.
           </p>
         )}
 
@@ -138,6 +115,24 @@ export default function Home() {
             <AlertCard key={alert.alert_id} alert={alert} />
           ))}
         </div>
+      </section>
+
+      {/* Demo Scenarios — at bottom for judge evaluation */}
+      <section className="mb-10">
+        <div className="flex items-center gap-2 mb-3">
+          <h2 className="text-lg font-semibold text-gray-800">Judge Scenario Pack</h2>
+          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-medium">Demo Only</span>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Pre-loaded NSE scenarios for hackathon evaluation. Each runs the full agent pipeline independently.
+        </p>
+        <DemoScenarios onAlertGenerated={(alert) => {
+          setAlerts((prev: Alert[]) => {
+            const incoming: Alert[] = Array.isArray(alert) ? alert as Alert[] : [alert as Alert];
+            const filtered = prev.filter((x: Alert) => !incoming.some((a) => a.ticker === x.ticker));
+            return [...incoming, ...filtered];
+          });
+        }} />
       </section>
     </div>
   );

@@ -284,25 +284,25 @@ The design document, requirements, and all agent prompts are available as contex
   - Ensure all tests pass, ask the user if questions arise.
   - Run all three demo scenarios via the frontend and verify the UI renders correctly with audit trail visible.
 
-- [ ] 19. ModelRouter — cost-efficient LLM routing
-  - [ ] 19.1 Implement `ModelRouter` class in `/backend/agents/model_router.py`
+- [x] 19. ModelRouter — cost-efficient LLM routing
+  - [x] 19.1 Implement `ModelRouter` class in `/backend/agents/model_router.py`
     - Implement `ROUTING_TABLE` dict mapping task types to (model_name, cost_per_call) as specified in the design
     - Implement `route(task_type)` returning (model_name, cost_saved_vs_gpt4o)
     - Implement `log_routing(task_type, audit_trail)` that appends an AuditStep with agent="ModelRouter", model_used, estimated_cost_saved, and a human-readable note (e.g., "Used gemini-flash for sector_tagging — saved ~$0.0199 vs GPT-4o")
     - _Requirements: 13.1, 13.2, 13.3_
 
-  - [ ] 19.2 Wire ModelRouter into DataFetcher and AlertGenerator
+  - [x] 19.2 Wire ModelRouter into DataFetcher and AlertGenerator
     - In `data_fetcher_node`: call `model_router.log_routing("sector_tagging", ...)` and `model_router.log_routing("promoter_detection", ...)` before the relevant classification steps
     - In `alert_generator_node`: call `model_router.log_routing("conflicted_alert", ...)` or `model_router.log_routing("standard_alert", ...)` based on `signal.is_conflicted`
     - Replace hardcoded model names in `gemini_generate` / `openai_generate` calls with the model returned by `model_router.route(task_type)`
     - _Requirements: 13.1, 13.2_
 
-  - [ ] 19.3 Add cumulative cost efficiency summary to `audit_log` node
+  - [x] 19.3 Add cumulative cost efficiency summary to `audit_log` node
     - In `audit_log_node`, sum all `estimated_cost_saved` values from ModelRouter audit entries
     - Append a final AuditStep with agent="ModelRouter", action="cost_summary", output_summary="Total estimated savings: $X.XXXX vs all-GPT-4o baseline"
     - _Requirements: 13.5_
 
-  - [ ] 19.4 Add "Model Routing" section to `AuditTrailPanel` frontend component
+  - [x] 19.4 Add "Model Routing" section to `AuditTrailPanel` frontend component
     - Filter audit trail entries where agent_name="ModelRouter" and render them as a dedicated "Model Routing" subsection
     - Display each routing decision as: "{model} for {task_type} — saved ~${cost_saved}"
     - Display cumulative savings total at the bottom of the section
@@ -314,8 +314,8 @@ The design document, requirements, and all agent prompts are available as contex
     - **Property 37: Cost savings non-negative** — for any routing decision, verify estimated_cost_saved ≥ 0
     - **Validates: Requirements 13.1, 13.2, 13.3**
 
-- [ ] 20. BacktestEngine — real historical breakout success rate
-  - [ ] 20.1 Implement `compute_breakout_success_rate(ticker, years=2)` in `/backend/agents/backtest_engine.py`
+- [x] 20. BacktestEngine — real historical breakout success rate
+  - [x] 20.1 Implement `compute_breakout_success_rate(ticker, years=2)` in `/backend/agents/backtest_engine.py`
     - Fetch `yf.Ticker(ticker).history(period=f"{years}y")` — real data, no mocking in production
     - Compute `rolling_52w_high` as 252-day rolling max shifted by 1 (no lookahead)
     - Compute `avg_vol_20d` as 20-day rolling mean shifted by 1
@@ -325,7 +325,7 @@ The design document, requirements, and all agent prompts are available as contex
     - If sample_size < 1, return BacktestResult with success_rate_pct=None and note="Insufficient historical data"
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5_
 
-  - [ ] 20.2 Wire BacktestEngine into `extended_enricher_node`
+  - [x] 20.2 Wire BacktestEngine into `extended_enricher_node`
     - Replace the existing `fetch_breakout_history` stub with a call to `compute_breakout_success_rate`
     - Store the full `BacktestResult` in `enriched_context.backtest_result`
     - Set `enriched_context.breakout_success_rate = backtest_result.success_rate_pct`
@@ -337,13 +337,13 @@ The design document, requirements, and all agent prompts are available as contex
     - **Property 39: Null result on zero sample** — mock yfinance to return data with no breakout events, verify success_rate_pct=None and sample_size=0
     - **Validates: Requirements 14.3, 14.4**
 
-- [ ] 21. Portfolio Memory — personalized holding context in alerts
-  - [ ] 21.1 Update `Holding` dataclass and Supabase fetch to include `created_at`
+- [x] 21. Portfolio Memory — personalized holding context in alerts
+  - [x] 21.1 Update `Holding` dataclass and Supabase fetch to include `created_at`
     - Add `created_at: datetime` field to the `Holding` dataclass (already in DB schema via DEFAULT NOW())
     - Update `GET /api/portfolio` handler to read `created_at` from Supabase and populate `holding.created_at`
     - _Requirements: 15.3_
 
-  - [ ] 21.2 Implement personalized context computation in `alert_generator_node`
+  - [x] 21.2 Implement personalized context computation in `alert_generator_node`
     - When `portfolio_match=True`, compute `holding_duration_days = (datetime.utcnow() - holding.created_at).days`
     - Compute `unrealised_pnl_inr = (current_price - avg_buy_price) * quantity`
     - Compute `total_portfolio_value = sum(h.quantity * h.current_price for h in portfolio)`
@@ -352,7 +352,7 @@ The design document, requirements, and all agent prompts are available as contex
     - Set all four fields on the `AlertResponse` object
     - _Requirements: 15.1, 15.2, 15.4_
 
-  - [ ] 21.3 Render personalized opening in `AlertCard` frontend component
+  - [x] 21.3 Render personalized opening in `AlertCard` frontend component
     - When `alert.personalized_opening` is non-null, render it as a highlighted callout block at the top of the expanded alert view (e.g., blue-tinted background, italic text)
     - Display `impact_pct_of_portfolio` as "Impact: X.X% of total portfolio" beneath the INR impact range
     - _Requirements: 15.1, 15.2_
@@ -361,8 +361,8 @@ The design document, requirements, and all agent prompts are available as contex
     - **Property 40: Personalized alert fields for portfolio holdings** — for any alert with portfolio_match=True, verify holding_duration_days ≥ 0, unrealised_pnl_inr non-null, impact_pct_of_portfolio ∈ [0.0, 100.0]
     - **Validates: Requirements 15.1**
 
-- [ ] 22. FilingScanner — unreported signal detection
-  - [ ] 22.1 Implement `FilingScanner` in `/backend/agents/filing_scanner.py`
+- [x] 22. FilingScanner — unreported signal detection
+  - [x] 22.1 Implement `FilingScanner` in `/backend/agents/filing_scanner.py`
     - Implement `scan_for_unreported_signals(ticker)` as specified in the design
     - Step 1: Tavily search with `site:nseindia.com/companies-listing/corporate-filings/bulk-deals {ticker}` and `days=1`
     - Step 2: Tavily search for news excluding nseindia.com and bseindia.com domains, `days=1`
@@ -371,18 +371,18 @@ The design document, requirements, and all agent prompts are available as contex
     - Append AuditStep recording both the filing URL and news cross-reference result
     - _Requirements: 16.1, 16.2, 16.5_
 
-  - [ ] 22.2 Wire FilingScanner into `data_fetcher_node`
+  - [x] 22.2 Wire FilingScanner into `data_fetcher_node`
     - After `fetch_nse_bulk_deals`, call `scan_for_unreported_signals(ticker)` and store result in state
     - Add `filing_scan_result: FilingScanResult | None` field to `PipelineState`
     - _Requirements: 16.1_
 
-  - [ ] 22.3 Wire unreported signal flag into SignalDetector and AlertGenerator
+  - [x] 22.3 Wire unreported signal flag into SignalDetector and AlertGenerator
     - In `signal_detector_node`: if `state["filing_scan_result"].is_unreported`, set `signal.is_unreported = True` on any bulk deal signal
     - In `alert_generator_node`: set `alert.unreported_signal = signal.is_unreported`
     - In priority ranking logic: boost unreported signals by 1 rank position
     - _Requirements: 16.3_
 
-  - [ ] 22.4 Add "🔍 Unreported Signal" badge to `AlertCard` frontend component
+  - [x] 22.4 Add "🔍 Unreported Signal" badge to `AlertCard` frontend component
     - When `alert.unreported_signal === true`, render a badge with text "🔍 Unreported Signal" using amber/yellow styling (e.g., `bg-amber-100 text-amber-800`) next to the signal type badge
     - _Requirements: 16.4_
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -32,18 +33,48 @@ def _get_supabase():
 
 
 def _load_portfolio() -> list[Holding]:
-    """Load holdings from Supabase and return as Holding objects."""
-    client = _get_supabase()
-    result = client.table("holdings").select("*").eq("user_id", "demo_user").execute()
+    """Load holdings from Supabase (fallback to portfolio router memory store)."""
+    from backend.routers.portfolio import _memory_holdings
+    try:
+        client = _get_supabase()
+        result = client.table("holdings").select("*").eq("user_id", "demo_user").execute()
+        rows = result.data or []
+        if rows:
+            holdings = []
+            for row in rows:
+                created_at = datetime.utcnow()
+                raw_ts = row.get("created_at")
+                if raw_ts:
+                    try:
+                        created_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except Exception:
+                        pass
+                holdings.append(Holding(
+                    ticker=row["ticker"],
+                    quantity=float(row["quantity"]),
+                    avg_buy_price=float(row["avg_buy_price"]),
+                    created_at=created_at,
+                ))
+            return holdings
+    except Exception:
+        pass
+
+    # Fallback: use in-memory store from portfolio router
     holdings = []
-    for row in (result.data or []):
-        holdings.append(
-            Holding(
-                ticker=row["ticker"],
-                quantity=float(row["quantity"]),
-                avg_buy_price=float(row["avg_buy_price"]),
-            )
-        )
+    for row in _memory_holdings.values():
+        created_at = datetime.utcnow()
+        raw_ts = row.get("created_at")
+        if raw_ts:
+            try:
+                created_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                pass
+        holdings.append(Holding(
+            ticker=row["ticker"],
+            quantity=float(row["quantity"]),
+            avg_buy_price=float(row["avg_buy_price"]),
+            created_at=created_at,
+        ))
     return holdings
 
 

@@ -10,6 +10,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
+from backend.agents.model_router import ModelRouter, generate_with_cascade
 from backend.models import (
     AlertResponse,
     AuditStep,
@@ -21,9 +22,34 @@ from backend.models import (
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
+SYSTEM_PROMPT = """You are "Kiro," an expert AI Investment Strategist for ET Markets. Your goal is to move beyond summarization and find "Alpha" (hidden signals) for retail investors.
+
+For every ticker provided, you MUST execute these 3 sequential steps:
+
+STEP 1: SIGNAL DETECTION (The 'What')
+- Identify the raw event (Bulk deal, Technical breakout, or Macro change).
+- Cite the source specifically (e.g., "NSE Filing dated March 27, 2026").
+
+STEP 2: CONTEXT ENRICHMENT (The 'So What')
+- Cross-reference the signal.
+- Example: If a promoter sold shares, check if it was an "inter-se transfer" (routine) or market dumping (distress).
+- Check historical success: "When this pattern happens on [Ticker], it leads to a rally 65% of the time."
+- Identify CONFLICTS: If RSI is overbought but price broke out, highlight the tension.
+
+STEP 3: PORTFOLIO-AWARE ACTION (The 'Now What')
+- Calculate the specific P&L risk based on the user's Avg Buy Price.
+- Give a non-binary recommendation: Instead of "Buy/Sell," use "Accumulate on dips," "Hedge with Puts," or "Wait for throwback to support at ₹XXXX."
+
+STRICT RULE: Never say "Monitor the stock." Always provide a specific price level or a data-backed Hold/Exit reasoning.
+"""
+
 DISCLAIMER_TEXT = (
     "This alert is for informational purposes only and is not licensed financial advice."
 )
+
+
+
+_model_router = ModelRouter()
 
 
 def _get_holding(portfolio: list[Holding], ticker: str) -> Holding | None:
@@ -52,8 +78,8 @@ def build_bulk_deal_prompt(state: PipelineState) -> str:
     eps_trend = enriched.eps_trend if enriched else None
     mgmt_commentary = enriched.mgmt_commentary if enriched else "Not available"
 
-    return f"""You are a financial analyst assistant for Indian retail investors.
-
+    return f"""{SYSTEM_PROMPT}
+---
 SIGNAL: Promoter bulk deal sell
 Ticker: {ticker}
 Deal size: {pct_equity:.2f}% of equity at {discount:.1f}% discount to market price
@@ -61,12 +87,11 @@ Filing: {filing_url}
 EPS trend (last 4Q): {eps_trend}
 Management commentary: {mgmt_commentary}
 
-Generate a structured alert with:
-1. SUMMARY (2 sentences)
-2. DISTRESS vs ROUTINE assessment with reasoning
-3. RECOMMENDED ACTION with confidence (Low/Medium/High) — not a binary buy/sell
-4. EVIDENCE CHAIN: list each data point with source URL
-5. DISCLAIMER: "This is not licensed financial advice."
+Generate a structured alert following your 3-step framework with:
+1. SIGNAL DETECTION: cite the filing URL and deal specifics
+2. CONTEXT ENRICHMENT: assess distress vs routine (inter-se transfer check), historical pattern success rate
+3. PORTFOLIO-AWARE ACTION: specific price level recommendation (NOT "monitor"), confidence (Low/Medium/High)
+Also include: EVIDENCE CHAIN with source URLs, BEAR CASE, WHAT TO WATCH (specific price levels)
 
 Format as JSON with these exact keys:
 {{
@@ -109,35 +134,31 @@ def build_breakout_conflicted_prompt(state: PipelineState) -> str:
             if flag.name == "fii_reduction":
                 fii_change = f"{flag.value:.1f}%"
 
-    return f"""You are a financial analyst assistant for Indian retail investors.
-
+    return f"""{SYSTEM_PROMPT}
+---
 SIGNAL: Breakout with conflicting indicators
 Ticker: {ticker}
-Price vs 52W High: {close} vs {week52_high} (BREAKOUT)
+Price vs 52W High: {close} vs {week52_high} (BREAKOUT CONFIRMED)
 Volume: {volume} vs {avg_vol:.0f} avg (above average)
-RSI(14): {rsi14:.1f} (OVERBOUGHT >70)
-FII change QoQ: {fii_change} (REDUCTION)
+RSI(14): {rsi14:.1f} (OVERBOUGHT >70 — CONFLICT)
+FII change QoQ: {fii_change} (REDUCTION — CONFLICT)
 Historical breakout success rate (2Y): {success_rate}% (sample_size={sample_size}, avg_gain={avg_gain}%, avg_loss={avg_loss}%)
 
-Generate a structured alert with:
-1. SUMMARY (2 sentences)
-2. BULL CASE: evidence for continued upside
-3. BEAR CASE: evidence for reversal
-4. RECOMMENDATION: confidence level only (Low/Medium/High), NOT a binary buy/sell
-5. WHAT TO WATCH: 2-3 specific future data points to monitor
-6. EVIDENCE CHAIN: each indicator with exact value, date, and source
-7. DISCLAIMER
+Generate a structured alert following your 3-step framework:
+1. SIGNAL DETECTION: cite exact RSI value, volume ratio, 52W high breach
+2. CONTEXT ENRICHMENT: quantify the conflict — bull case vs bear case with specific data, historical success rate
+3. PORTFOLIO-AWARE ACTION: specific support/resistance price levels, NOT "monitor" — use "Accumulate on dip to ₹XXXX" or "Hedge if price falls below ₹XXXX"
 
 Format as JSON with these exact keys:
 {{
   "signal_type": "breakout_conflicted",
   "ticker": "{ticker}",
   "summary": "...",
-  "recommended_action": "Monitor closely — conflicting signals present",
+  "recommended_action": "...",
   "confidence": "Low|Medium|High",
   "bull_case": "...",
   "bear_case": "...",
-  "what_to_watch": ["...", "...", "..."],
+  "what_to_watch": ["specific price level 1", "specific price level 2", "specific data point 3"],
   "evidence_chain": [
     {{"label": "RSI(14) value", "value": "{rsi14:.1f} as of {datetime.utcnow().date()}", "source_name": "yfinance", "source_url": "https://finance.yahoo.com/quote/{ticker}", "retrieved_at": "{datetime.utcnow().isoformat()}"}}
   ],
@@ -155,20 +176,17 @@ def build_macro_event_prompt(state: PipelineState) -> str:
     priority_rank = enriched.priority_rank if enriched else 1
     news_summary = "; ".join(n.title for n in news_results[:3]) if news_results else "No news available"
 
-    return f"""You are a financial analyst assistant for Indian retail investors.
-
+    return f"""{SYSTEM_PROMPT}
+---
 SIGNAL: Macro event affecting portfolio
 Ticker: {ticker}
 News context: {news_summary}
-Estimated P&L impact: ₹{impact_low:,.0f} to ₹{impact_high:,.0f} (priority rank: {priority_rank})
+Estimated P&L impact on holding: ₹{impact_low:,.0f} to ₹{impact_high:,.0f} (priority rank: {priority_rank})
 
-Generate a structured alert with:
-1. SUMMARY (2 sentences)
-2. ESTIMATED IMPACT on holding with methodology explanation
-3. PRIORITY RANK relative to other simultaneous events
-4. RECOMMENDED ACTION with confidence (Low/Medium/High)
-5. EVIDENCE CHAIN with news sources
-6. DISCLAIMER
+Generate a structured alert following your 3-step framework:
+1. SIGNAL DETECTION: cite the specific news source and event
+2. CONTEXT ENRICHMENT: sector sensitivity analysis, which holdings are most exposed, historical precedent
+3. PORTFOLIO-AWARE ACTION: specific price levels to watch, NOT "monitor" — quantify the impact and give a concrete action
 
 Format as JSON with these exact keys:
 {{
@@ -179,7 +197,7 @@ Format as JSON with these exact keys:
   "confidence": "Low|Medium|High",
   "bull_case": null,
   "bear_case": null,
-  "what_to_watch": ["...", "..."],
+  "what_to_watch": ["specific price level or data point 1", "specific price level or data point 2"],
   "evidence_chain": [
     {{"label": "...", "value": "...", "source_name": "...", "source_url": "...", "retrieved_at": "..."}}
   ],
@@ -188,27 +206,19 @@ Format as JSON with these exact keys:
 
 
 # ---------------------------------------------------------------------------
-# LLM calls
+# LLM calls — kept for backward compat, now delegates to model_router cascade
 # ---------------------------------------------------------------------------
 
 def gemini_generate(prompt: str) -> str:
     """Generate text using Gemini 1.5 Flash."""
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", google_api_key=api_key)
-    response = llm.invoke(prompt)
-    return response.content if hasattr(response, "content") else str(response)
+    from backend.agents.model_router import call_gemini
+    return call_gemini(prompt)
 
 
 def openai_generate(prompt: str) -> str:
     """Generate text using OpenAI GPT-4o."""
-    from langchain_openai import ChatOpenAI
-
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    llm = ChatOpenAI(model="gpt-4o", openai_api_key=api_key)
-    response = llm.invoke(prompt)
-    return response.content if hasattr(response, "content") else str(response)
+    from backend.agents.model_router import call_openai
+    return call_openai(prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +279,7 @@ def _parse_alert_response(raw: str, state: PipelineState) -> AlertResponse:
         "impact_pct_of_portfolio": None,
         "unreported_signal": signals[0].is_unreported if signals else False,
         "created_at": datetime.utcnow().isoformat(),
+        "priority_rank": None,
     }
     return alert
 
@@ -298,27 +309,14 @@ def alert_generator_node(state: PipelineState) -> PipelineState:
     else:
         prompt = build_breakout_conflicted_prompt(state)
 
-    # LLM call with fallback
-    model_used = "gemini-1.5-flash"
-    fallback_occurred = False
-    fallback_reason: str | None = None
-    raw = ""
+    # Route model via ModelRouter
+    task_type = "conflicted_alert" if sig.is_conflicted else "standard_alert"
+    routed_model = _model_router.log_routing(task_type, audit)
 
-    try:
-        raw = gemini_generate(prompt)
-        if not raw or len(raw.strip()) < 50:
-            raise ValueError("Empty or too-short Gemini response")
-    except Exception as e:
-        fallback_reason = str(e)
-        try:
-            raw = openai_generate(prompt)
-            model_used = "gpt-4o"
-            fallback_occurred = True
-        except Exception as e2:
-            # Both failed — build minimal alert
-            raw = ""
-            fallback_reason = f"Gemini: {e}; GPT-4o: {e2}"
-            fallback_occurred = True
+    # LLM call with 3-tier cascade (Groq → Gemini → GPT-4o)
+    raw, model_used, fallback_occurred, fallback_reason = generate_with_cascade(
+        prompt, routed_model, audit
+    )
 
     audit.append(
         AuditStep(

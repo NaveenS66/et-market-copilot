@@ -10,6 +10,7 @@ import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 
+from backend.agents.backtest_engine import compute_breakout_success_rate
 from backend.models import (
     AuditStep,
     BacktestResult,
@@ -218,12 +219,28 @@ def fetch_eps_trend(ticker: str, quarters: int = 4) -> list[float]:
     """Fetch last N quarters of EPS from yfinance."""
     try:
         t = yf.Ticker(ticker)
-        earnings = t.quarterly_earnings
-        if earnings is None or earnings.empty:
-            return []
-        eps_col = "EPS" if "EPS" in earnings.columns else earnings.columns[0]
-        values = earnings[eps_col].dropna().tolist()
-        return [float(v) for v in values[:quarters]]
+        # Try quarterly_income_stmt first (newer yfinance), fall back to quarterly_earnings
+        earnings = None
+        try:
+            stmt = t.quarterly_income_stmt
+            if stmt is not None and not stmt.empty:
+                # Look for Basic EPS or Diluted EPS row
+                for row_name in ["Basic EPS", "Diluted EPS", "EPS"]:
+                    if row_name in stmt.index:
+                        values = stmt.loc[row_name].dropna().tolist()
+                        return [float(v) for v in values[:quarters]]
+        except Exception:
+            pass
+        # Fallback: quarterly_earnings (older yfinance)
+        try:
+            earnings = t.quarterly_earnings
+            if earnings is not None and not earnings.empty:
+                eps_col = "EPS" if "EPS" in earnings.columns else earnings.columns[0]
+                values = earnings[eps_col].dropna().tolist()
+                return [float(v) for v in values[:quarters]]
+        except Exception:
+            pass
+        return []
     except Exception:
         return []
 
@@ -326,9 +343,9 @@ def extended_enricher_node(state: PipelineState) -> PipelineState:
     ticker = state["ticker"]
     audit: list[AuditStep] = []
 
-    # Fetch breakout history
+    # Fetch breakout history via BacktestEngine
     try:
-        backtest = fetch_breakout_history(ticker, years=2)
+        backtest = compute_breakout_success_rate(ticker, years=2)
         enriched = base_state.get("enriched_context")
         if enriched is not None:
             enriched.breakout_success_rate = backtest.success_rate_pct
@@ -339,7 +356,8 @@ def extended_enricher_node(state: PipelineState) -> PipelineState:
                 action="fetch_breakout_history",
                 output_summary=(
                     f"Backtest: success_rate={backtest.success_rate_pct}%, "
-                    f"sample_size={backtest.sample_size}"
+                    f"sample_size={backtest.sample_size}, "
+                    f"avg_gain={backtest.avg_gain_pct}%, avg_loss={backtest.avg_loss_pct}%"
                 ),
             )
         )

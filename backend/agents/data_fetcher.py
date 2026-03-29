@@ -11,6 +11,8 @@ import yfinance as yf
 from dotenv import load_dotenv
 from tavily import TavilyClient
 
+from backend.agents.model_router import ModelRouter
+from backend.agents.filing_scanner import scan_for_unreported_signals_sync
 from backend.models import (
     AuditStep,
     BulkDeal,
@@ -18,6 +20,8 @@ from backend.models import (
     PipelineState,
     PriceData,
 )
+
+_model_router = ModelRouter()
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -83,28 +87,40 @@ def fetch_price_data(ticker: str) -> PriceData:
 # ---------------------------------------------------------------------------
 
 def gemini_grounding_fallback(ticker: str) -> PriceData:
-    """Use Gemini to get approximate price data when yfinance fails."""
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    """Use Gemini (or Groq fallback) to get approximate price data when yfinance fails."""
+    from backend.agents.model_router import call_gemini, call_groq
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=api_key)
     prompt = (
         f"Provide approximate current market data for NSE ticker {ticker}. "
         "Return ONLY a JSON object with keys: close (float), volume (int), "
         "avg_volume_20d (float), week52_high (float), week52_low (float), rsi14 (float). "
         "Use realistic estimates based on recent market data."
     )
-    response = llm.invoke(prompt)
+
+    text = ""
+    source = "gemini-grounding"
+    # Try Gemini first, then Groq
+    for fn, label in [
+        (lambda p: call_gemini(p), "gemini-grounding"),
+        (lambda p: call_groq(p), "groq-grounding"),
+    ]:
+        try:
+            text = fn(prompt)
+            source = label
+            if text and len(text.strip()) > 10:
+                break
+        except Exception:
+            continue
+
     import json, re
-    text = response.content if hasattr(response, "content") else str(response)
-    # Extract JSON from response
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
-        data = json.loads(match.group())
+        try:
+            data = json.loads(match.group())
+        except json.JSONDecodeError:
+            data = {}
     else:
-        # Fallback defaults
-        data = {"close": 100.0, "volume": 1000000, "avg_volume_20d": 900000.0,
-                "week52_high": 120.0, "week52_low": 80.0, "rsi14": 50.0}
+        data = {}
 
     return PriceData(
         ticker=ticker,
@@ -114,7 +130,7 @@ def gemini_grounding_fallback(ticker: str) -> PriceData:
         week52_high=float(data.get("week52_high", 120.0)),
         week52_low=float(data.get("week52_low", 80.0)),
         rsi14=float(data.get("rsi14", 50.0)),
-        source_url=f"gemini-grounding:{ticker}",
+        source_url=f"{source}:{ticker}",
         retrieved_at=datetime.utcnow(),
     )
 
@@ -278,6 +294,10 @@ def data_fetcher_node(state: PipelineState) -> PipelineState:
                 )
             )
 
+    # Log ModelRouter decisions for classification tasks
+    _model_router.log_routing("sector_tagging", audit)
+    _model_router.log_routing("promoter_detection", audit)
+
     # 2. Bulk deals
     bulk_deals: list[BulkDeal] = []
     try:
@@ -320,10 +340,37 @@ def data_fetcher_node(state: PipelineState) -> PipelineState:
             )
         )
 
+    # 4. FilingScanner — detect unreported signals
+    from backend.models import FilingScanResult
+    filing_scan_result: FilingScanResult | None = None
+    try:
+        filing_scan_result = scan_for_unreported_signals_sync(ticker)
+        audit.append(
+            AuditStep(
+                agent="DataFetcher",
+                action="filing_scan",
+                source_urls=[filing_scan_result.filing_url] if filing_scan_result.filing_url else [],
+                output_summary=(
+                    f"has_filing={filing_scan_result.has_filing}, "
+                    f"is_unreported={filing_scan_result.is_unreported}, "
+                    f"news_count={filing_scan_result.news_count}"
+                ),
+            )
+        )
+    except Exception as e:
+        audit.append(
+            AuditStep(
+                agent="DataFetcher",
+                action="filing_scan_error",
+                output_summary=str(e),
+            )
+        )
+
     return {
         **state,
         "price_data": price_data,
         "bulk_deals": bulk_deals,
         "news_results": news_results,
+        "filing_scan_result": filing_scan_result,
         "audit_trail": state.get("audit_trail", []) + audit,
     }

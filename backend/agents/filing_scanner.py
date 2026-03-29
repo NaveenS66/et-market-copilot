@@ -87,12 +87,13 @@ def scan_for_unreported_signals_sync(ticker: str) -> FilingScanResult:
 
     filing_url = filing_items[0].get("url", "")
 
-    # Step 2: Cross-reference news
+    # Step 2: Cross-reference news in last 24 hours
     try:
         news_results = client.search(
             query=f"{ticker} bulk deal insider trade",
             max_results=5,
             search_depth="basic",
+            days=1,
         )
         news_items = [
             r for r in news_results.get("results", [])

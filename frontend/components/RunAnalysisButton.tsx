@@ -42,6 +42,10 @@ export default function RunAnalysisButton({ onComplete }: RunAnalysisButtonProps
         throw new Error(data.detail || `Error ${res.status}`);
       }
 
+      const alerts = await res.json();
+      if (Array.isArray(alerts) && alerts.length === 0) {
+        setError("Pipeline ran — no signals detected for current holdings. Try adding INFY.NS or HDFCBANK.NS for richer signals.");
+      }
       onComplete();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Analysis failed");

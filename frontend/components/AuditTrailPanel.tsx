@@ -21,6 +21,7 @@ interface AuditStep {
 
 interface AuditTrailPanelProps {
   alertId: string;
+  inlineSteps?: AuditStep[] | null;
   onClose: () => void;
 }
 
@@ -42,12 +43,18 @@ function AgentChip({ name }: { name: string }) {
   );
 }
 
-export default function AuditTrailPanel({ alertId, onClose }: AuditTrailPanelProps) {
-  const [steps, setSteps] = useState<AuditStep[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function AuditTrailPanel({ alertId, inlineSteps, onClose }: AuditTrailPanelProps) {
+  const [steps, setSteps] = useState<AuditStep[]>(inlineSteps || []);
+  const [loading, setLoading] = useState(!inlineSteps || inlineSteps.length === 0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // If we already have inline steps, no need to fetch
+    if (inlineSteps && inlineSteps.length > 0) {
+      setSteps(inlineSteps);
+      setLoading(false);
+      return;
+    }
     fetch(`${API_BASE}/api/alerts/${alertId}/audit`)
       .then((r) => r.json())
       .then((data) => {
@@ -58,7 +65,7 @@ export default function AuditTrailPanel({ alertId, onClose }: AuditTrailPanelPro
         setError(e.message);
         setLoading(false);
       });
-  }, [alertId]);
+  }, [alertId, inlineSteps]);
 
   const routerSteps = steps.filter((s: AuditStep) => s.agent_name === "ModelRouter");
   const otherSteps = steps.filter((s: AuditStep) => s.agent_name !== "ModelRouter");

@@ -24,27 +24,41 @@ def _get_supabase():
 
 @router.get("")
 def get_alerts():
-    """Fetch alerts ordered by created_at desc, limit 20."""
-    client = _get_supabase()
-    result = (
-        client.table("alerts")
-        .select("*")
-        .order("created_at", desc=True)
-        .limit(20)
-        .execute()
-    )
-    return result.data or []
+    """Fetch alerts ordered by absolute impact (highest first), then recency. Limit 20."""
+    try:
+        client = _get_supabase()
+        result = (
+            client.table("alerts")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception:
+        return []
+
+    # Sort by abs(estimated_impact_inr_high) descending, nulls last
+    def sort_key(row):
+        val = row.get("estimated_impact_inr_high")
+        return abs(val) if val is not None else -1
+
+    rows.sort(key=sort_key, reverse=True)
+    return rows[:20]
 
 
 @router.get("/{alert_id}/audit")
 def get_audit_trail(alert_id: str):
     """Fetch audit trail entries for a given alert_id."""
-    client = _get_supabase()
-    result = (
-        client.table("audit_trail")
-        .select("*")
-        .eq("alert_id", alert_id)
-        .order("timestamp", desc=False)
-        .execute()
-    )
-    return result.data or []
+    try:
+        client = _get_supabase()
+        result = (
+            client.table("audit_trail")
+            .select("*")
+            .eq("alert_id", alert_id)
+            .order("timestamp", desc=False)
+            .execute()
+        )
+        return result.data or []
+    except Exception:
+        return []
